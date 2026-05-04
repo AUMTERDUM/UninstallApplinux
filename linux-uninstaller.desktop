@@ -1,0 +1,14 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Linux Uninstaller
+Name[th]=ถอนการติดตั้งแอป
+Comment=View installed apps and uninstall Linux packages from one screen
+Exec=/usr/bin/linux-uninstaller
+Path=/opt/linux-uninstaller
+Icon=linux-uninstaller
+Terminal=false
+Categories=System;Settings;Utility;
+Keywords=uninstall;package;apt;snap;flatpak;linux;
+StartupNotify=true
+SingleMainWindow=true

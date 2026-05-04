@@ -1,0 +1,13 @@
+Source: linux-uninstaller
+Section: utils
+Priority: optional
+Maintainer: Local Builder <builder@example.invalid>
+Standards-Version: 4.7.0
+Rules-Requires-Root: no
+
+Package: linux-uninstaller
+Architecture: all
+Depends: python3, ${misc:Depends}
+Description: Simple local web UI for uninstalling Linux applications
+ A lightweight local interface to browse installed packages, inspect
+ locations, and remove APT/dpkg, Snap, and Flatpak apps from one screen.

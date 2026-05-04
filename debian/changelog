@@ -1,0 +1,5 @@
+linux-uninstaller (1.0.0-1) unstable; urgency=medium
+
+  * Initial package.
+
+ -- Local Builder <builder@example.invalid>  Fri, 02 May 2026 16:25:00 +0700

@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" role="img" aria-label="Linux Uninstaller icon">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#1d4ed8"/>
+      <stop offset="100%" stop-color="#0f172a"/>
+    </linearGradient>
+  </defs>
+  <rect width="256" height="256" rx="56" fill="url(#bg)"/>
+  <path d="M58 86c0-8 6-14 14-14h40l12-16c3-4 7-6 12-6h48c8 0 14 6 14 14v22H58V86Z" fill="#bfdbfe"/>
+  <path d="M58 92h140v78c0 20-16 36-36 36H94c-20 0-36-16-36-36V92Z" fill="#eff6ff"/>
+  <path d="M104 122h12v52h-12zm36 0h12v52h-12z" fill="#1e293b"/>
+  <path d="M84 104h88" stroke="#1e293b" stroke-width="10" stroke-linecap="round"/>
+  <circle cx="192" cy="188" r="34" fill="#dc2626"/>
+  <path d="M176 188h32" stroke="#fff" stroke-width="10" stroke-linecap="round"/>
+</svg>

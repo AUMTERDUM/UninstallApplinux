@@ -1,0 +1,19 @@
+#!/usr/bin/make -f
+
+PACKAGE := linux-uninstaller
+VERSION := $(shell dpkg-parsechangelog -S Version)
+ARCH := all
+
+build:
+	@true
+
+clean:
+	rm -rf build/$(PACKAGE)-* debian/files
+	rm -f ../$(PACKAGE)_$(VERSION)_$(ARCH).deb ../$(PACKAGE)_$(VERSION)_amd64.buildinfo ../$(PACKAGE)_$(VERSION)_amd64.changes
+
+binary binary-indep:
+	VERSION=$(VERSION) OUTPUT_DIR=$(CURDIR)/.. ./build_deb.sh
+	printf '%s_%s_%s.deb utils optional\n' $(PACKAGE) $(VERSION) $(ARCH) > debian/files
+
+binary-arch:
+	@true
