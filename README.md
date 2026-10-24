@@ -1,77 +1,91 @@
 # Linux Uninstaller
 
-โปรแกรมถอนการติดตั้งอย่างง่ายสำหรับ Linux เปิดใช้งานผ่าน browser บนเครื่องตัวเอง เพื่อดูรายการแอป/แพ็กเกจ ดูตำแหน่งไฟล์ที่ติดตั้ง และกดถอนการติดตั้งได้จากหน้าจอเดียว
+**English** | [ภาษาไทย](README.th.md)
 
-## ความสามารถ
+A simple uninstaller for Linux that runs as a local web UI in your browser. Browse installed apps and packages, see where they live on disk, and uninstall them from one screen.
 
-- แสดงรายการแพ็กเกจทั้งหมดจาก `APT/dpkg`
-- แสดงรายการแอปจาก `Snap`
-- รองรับ `Flatpak` อัตโนมัติถ้าเครื่องมีคำสั่ง `flatpak`
-- ค้นหาจากชื่อแพ็กเกจ รายละเอียด หรือแหล่งติดตั้ง
-- แสดงข้อมูลเวอร์ชัน รายละเอียด และที่อยู่จัดเก็บของแอปที่เลือก
-- กดถอนการติดตั้งโดยใช้ `pkexec` เพื่อขอสิทธิ์ผู้ดูแลระบบเมื่อจำเป็น
-- ใช้ Python มาตรฐาน ไม่ต้องติดตั้ง Tkinter หรือ framework เพิ่ม
+## Features
 
-## วิธีรัน
+- Lists all `APT/dpkg` packages
+- Lists `Snap` apps
+- Supports `Flatpak` automatically when the `flatpak` command is available
+- Search by package name, description, or source
+- Shows version, description, and install locations for the selected app
+- Previews exactly which packages will be removed (dry-run) before you confirm, and warns when system or desktop packages would go with it
+- "Apps only" filter and a size column, with sortable headers
+- Uninstalls via `pkexec` to request admin rights when needed
+- Pure Python standard library, no Tkinter or extra frameworks
+
+## Install from a release
+
+Download the `.deb` from [Releases](https://github.com/AUMTERDUM/UninstallApplinux/releases/latest), then run:
+
+```bash
+sudo apt install ./linux-uninstaller_1.0.0_all.deb
+```
+
+Open **Linux Uninstaller** from your app menu, or run `linux-uninstaller`.
+
+## Run from source
 
 ```bash
 python3 linux_uninstaller.py
 ```
 
-หรือรันผ่านสคริปต์:
+Or use the script:
 
 ```bash
 ./run.sh
 ```
 
-จากนั้นเปิด URL ที่โปรแกรมแสดง เช่น `http://127.0.0.1:8765`
+Then open the URL it prints, e.g. `http://127.0.0.1:8765`.
 
-ถ้าต้องการรันโดยไม่เปิด browser อัตโนมัติ:
+To run without opening a browser automatically:
 
 ```bash
 python3 linux_uninstaller.py --no-browser
 ```
 
-## ติดตั้งเป็นแอปถาวร
+## Install as a desktop app
 
-ถ้าต้องการให้เปิดจากเมนูแอปของ Linux ได้เหมือนแอปทั่วไป ให้รัน:
+To launch it from your Linux app menu like any other app, run:
 
 ```bash
 ./install_app.sh
 ```
 
-สคริปต์นี้จะติดตั้งไฟล์ต่อไปนี้ในระดับผู้ใช้:
+This installs the following for the current user:
 
-- launcher ที่ `~/.local/share/applications/linux-uninstaller.desktop`
-- icon ที่ `~/.local/share/icons/hicolor/scalable/apps/linux-uninstaller.svg`
-- shortcut บน Desktop ที่ `~/Desktop/Linux Uninstaller.desktop`
+- Launcher at `~/.local/share/applications/linux-uninstaller.desktop`
+- Icon at `~/.local/share/icons/hicolor/scalable/apps/linux-uninstaller.svg`
+- Desktop shortcut at `~/Desktop/Linux Uninstaller.desktop`
 
-จากนั้นค้นหา `Linux Uninstaller` ในเมนูแอปแล้วเปิดใช้งานได้ทันที
+Then search for `Linux Uninstaller` in your app menu.
 
-ถ้าต้องการลบ launcher ออกจากระบบ:
+To remove the launcher:
 
 ```bash
 ./uninstall_app.sh
 ```
 
-## สร้างแพ็กเกจ .deb
+## Build a .deb package
 
-ถ้าต้องการ build เป็นแพ็กเกจ Debian/Ubuntu:
+To build a Debian/Ubuntu package:
 
 ```bash
 ./build_deb.sh
 ```
 
-แพ็กเกจที่ได้จะอยู่ในโฟลเดอร์ `dist/`
+The package is written to `dist/`.
 
-ถ้าต้องการ build แบบโครงสร้าง Debian มาตรฐาน สามารถใช้:
+For a standard Debian-structure build:
 
 ```bash
 dpkg-buildpackage -b -us -uc -d
 ```
 
-รายละเอียดเพิ่มเติมดูที่ `DEB_PACKAGE.md`
+See `DEB_PACKAGE.md` for details.
 
-## หมายเหตุ
+## Notes
 
-การถอนการติดตั้งจะลบแพ็กเกจจริงจากระบบ ควรตรวจสอบชื่อแอปและคำสั่งที่แสดงในหน้าต่างยืนยันก่อนกดตกลงทุกครั้ง โปรแกรม bind ที่ `127.0.0.1` เท่านั้น เพื่อให้ใช้งานจากเครื่องตัวเอง
+Uninstalling really removes packages from your system. Always check the package list and command shown in the confirmation dialog before confirming. The app binds to `127.0.0.1` only and rejects requests from other websites, so it is reachable only from your own machine.
