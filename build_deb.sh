@@ -62,7 +62,8 @@ Version: $VERSION
 Section: utils
 Priority: optional
 Architecture: $ARCH
-Depends: python3
+Depends: python3, apt, pkexec | policykit-1
+Suggests: flatpak, snapd
 Maintainer: Local Builder <builder@example.invalid>
 Description: Simple local web UI for uninstalling Linux applications
  A lightweight local interface to browse installed packages, inspect

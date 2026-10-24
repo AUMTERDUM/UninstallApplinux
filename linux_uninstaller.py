@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import glob
 import json
 import os
 import shutil
@@ -29,6 +30,8 @@ class AppEntry:
     name: str
     version: str
     summary: str
+    size_kb: int = 0
+    is_app: bool = True
 
 
 def command_exists(command: str) -> bool:
@@ -60,15 +63,16 @@ def load_dpkg_apps() -> list[AppEntry]:
         [
             "dpkg-query",
             "-W",
-            "-f=${Package}\t${Version}\t${db:Status-Abbrev}\t${binary:Summary}\n",
+            "-f=${Package}\t${Version}\t${db:Status-Abbrev}\t${Installed-Size}\t${binary:Summary}\n",
         ]
     )
+    launcher_packages = dpkg_launcher_packages()
     entries: list[AppEntry] = []
     for line in safe_split_lines(output):
-        parts = line.split("\t", 3)
-        if len(parts) != 4:
+        parts = line.split("\t", 4)
+        if len(parts) != 5:
             continue
-        package_id, version, status, summary = parts
+        package_id, version, status, size, summary = parts
         if status.startswith("ii"):
             entries.append(
                 AppEntry(
@@ -77,9 +81,27 @@ def load_dpkg_apps() -> list[AppEntry]:
                     name=package_id,
                     version=version,
                     summary=summary,
+                    size_kb=int(size) if size.isdigit() else 0,
+                    is_app=package_id in launcher_packages,
                 )
             )
     return entries
+
+
+def dpkg_launcher_packages() -> set[str]:
+    """Packages that own a .desktop launcher, i.e. what users think of as apps."""
+    desktop_files = glob.glob("/usr/share/applications/*.desktop")
+    if not desktop_files:
+        return set()
+    packages: set[str] = set()
+    for line in safe_split_lines(run_text_command(["dpkg-query", "-S", *desktop_files])):
+        owners, _, _ = line.partition(": ")
+        packages.update(owner.split(":")[0].strip() for owner in owners.split(","))
+    return packages
+
+
+def snap_size_kb(name: str) -> int:
+    return sum(os.path.getsize(path) for path in glob.glob(f"/var/lib/snapd/snaps/{name}_*.snap")) // 1024
 
 
 def load_snap_apps() -> list[AppEntry]:
@@ -104,9 +126,20 @@ def load_snap_apps() -> list[AppEntry]:
                 name=name,
                 version=version,
                 summary=summary,
+                size_kb=snap_size_kb(name),
             )
         )
     return entries
+
+
+def parse_human_size_kb(text: str) -> int:
+    """Parse flatpak's '1.2\xa0GB' / '350.0 MB' / '12 kB' into KiB; 0 if unreadable."""
+    number, _, unit = text.replace("\xa0", " ").strip().partition(" ")
+    scale = {"bytes": 1 / 1024, "kb": 1, "mb": 1024, "gb": 1024**2, "tb": 1024**3}.get(unit.strip().lower())
+    try:
+        return int(float(number) * scale) if scale else 0
+    except ValueError:
+        return 0
 
 
 def load_flatpak_apps() -> list[AppEntry]:
@@ -114,7 +147,7 @@ def load_flatpak_apps() -> list[AppEntry]:
         return []
 
     output = run_text_command(
-        ["flatpak", "list", "--app", "--columns=application,name,version"]
+        ["flatpak", "list", "--app", "--columns=application,name,version,size"]
     )
     entries: list[AppEntry] = []
     for line in safe_split_lines(output):
@@ -124,6 +157,7 @@ def load_flatpak_apps() -> list[AppEntry]:
         package_id = parts[0]
         display_name = parts[1] if len(parts) > 1 and parts[1] else package_id
         version = parts[2] if len(parts) > 2 else ""
+        size = parse_human_size_kb(parts[3]) if len(parts) > 3 else 0
         entries.append(
             AppEntry(
                 manager="Flatpak",
@@ -131,6 +165,7 @@ def load_flatpak_apps() -> list[AppEntry]:
                 name=display_name,
                 version=version,
                 summary=package_id,
+                size_kb=size,
             )
         )
     return entries
@@ -209,6 +244,32 @@ def uninstall_command(app: AppEntry) -> list[str]:
     if app.manager == "Flatpak":
         return ["flatpak", "uninstall", "-y", app.package_id]
     return []
+
+
+# ponytail: name heuristic for desktop pieces apt marks "optional"; extend when a new DE slips through
+DESKTOP_CRITICAL = {"gdm3", "sddm", "lightdm", "xorg", "xserver-xorg-core", "xwayland", "gnome-shell", "plasma-workspace"}
+
+
+def removal_preview(app: AppEntry) -> dict[str, object]:
+    """Packages that would actually be removed, plus which of them are system-critical."""
+    if app.manager != "APT/dpkg":
+        return {"packages": [app.package_id], "critical": []}
+
+    simulated = run_text_command(["apt-get", "-s", "remove", app.package_id])
+    packages = [line.split()[1] for line in simulated.splitlines() if line.startswith("Remv ")]
+    if not packages:
+        # apt refused (e.g. essential package); the real removal would fail the same way.
+        return {"packages": [], "critical": [], "error": simulated[-1500:]}
+
+    info = run_text_command(["dpkg-query", "-W", "-f=${Package}\t${Priority}\t${Essential}\n", *packages])
+    critical = []
+    for line in safe_split_lines(info):
+        name, _, rest = line.partition("\t")
+        priority, _, essential = rest.partition("\t")
+        if priority in ("required", "important") or essential == "yes":
+            critical.append(name)
+    critical += [p for p in packages if p not in critical and (p in DESKTOP_CRITICAL or "-desktop" in p)]
+    return {"packages": packages, "critical": critical}
 
 
 def run_uninstall(app: AppEntry) -> dict[str, object]:
@@ -341,6 +402,7 @@ HTML = r'''<!doctype html>
     }
     .search-bar button:hover { filter: brightness(1.1); }
     .search-bar button:disabled { opacity: .55; cursor: not-allowed; }
+    .search-bar label { display: flex; align-items: center; gap: 6px; font-size: 13px; white-space: nowrap; cursor: pointer; }
 
     /* ─── Icons ─────────────────────────────────────────── */
     .icon {
@@ -429,6 +491,8 @@ HTML = r'''<!doctype html>
       letter-spacing: .04em;
       z-index: 1;
     }
+    thead th[data-sort] { cursor: pointer; user-select: none; }
+    thead th[data-sort]:hover { color: var(--ink); }
     tbody tr {
       cursor: pointer;
     }
@@ -442,6 +506,7 @@ HTML = r'''<!doctype html>
       vertical-align: middle;
     }
     .col-source { width: 110px; }
+    .col-size   { width: 90px; color: var(--muted); font-size: 12px; text-align: right; white-space: nowrap; }
     .col-name   { width: 220px; font-weight: 600; word-break: break-word; }
     .col-ver    { width: 130px; color: var(--muted); font-size: 12px; word-break: break-word; }
     .col-desc   { color: var(--muted); font-size: 13px; word-break: break-word; }
@@ -607,6 +672,10 @@ HTML = r'''<!doctype html>
       margin-bottom: 14px;
     }
     .alert-icon { flex-shrink: 0; font-size: 18px; }
+    .alert-box.critical { flex-direction: column; font-weight: 600; }
+    .alert-box.critical label { display: flex; gap: 8px; align-items: center; cursor: pointer; }
+    .pkg-list { max-height: 140px; overflow: auto; font-family: "SFMono-Regular", Consolas, monospace; font-size: 12px; line-height: 1.6; }
+    .pkg-list .crit { color: var(--danger); font-weight: 700; }
     .info-table { width: 100%; border-collapse: collapse; font-size: 13px; margin-bottom: 14px; }
     .info-table td { padding: 5px 0; vertical-align: top; }
     .info-table td:first-child { width: 100px; color: var(--muted); font-weight: 600; }
@@ -686,6 +755,7 @@ HTML = r'''<!doctype html>
     <select id="managerFilter" aria-label="แหล่งติดตั้ง">
       <option value="">ทุกแหล่งติดตั้ง</option>
     </select>
+    <label><input id="appsOnly" type="checkbox" checked> เฉพาะแอป</label>
     <button id="refresh" class="btn-icon"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg>รีเฟรช</button>
   </div>
 
@@ -701,9 +771,10 @@ HTML = r'''<!doctype html>
         <table>
           <thead>
             <tr>
-              <th class="col-source">แหล่งติดตั้ง</th>
-              <th class="col-name">ชื่อแอป / แพ็กเกจ</th>
+              <th class="col-source" data-sort="manager">แหล่งติดตั้ง</th>
+              <th class="col-name" data-sort="name">ชื่อแอป / แพ็กเกจ</th>
               <th class="col-ver">เวอร์ชัน</th>
+              <th class="col-size" data-sort="size_kb">ขนาด</th>
               <th class="col-desc">รายละเอียด</th>
             </tr>
           </thead>
@@ -766,6 +837,8 @@ HTML = r'''<!doctype html>
     const appsEl        = document.querySelector('#apps');
     const searchEl      = document.querySelector('#search');
     const managerFilterEl = document.querySelector('#managerFilter');
+    const appsOnlyEl    = document.querySelector('#appsOnly');
+    const headEl        = document.querySelector('thead');
     const refreshEl     = document.querySelector('#refresh');
     const statusEl      = document.querySelector('#status');
     const listMetaEl    = document.querySelector('#listMeta');
@@ -785,6 +858,15 @@ HTML = r'''<!doctype html>
 
     let allApps = [];
     let selected = null;
+    let sortKey = 'manager';
+    let sortDir = 1;
+
+    function fmtSize(kb) {
+      if (!kb) return '-';
+      if (kb >= 1048576) return `${(kb / 1048576).toFixed(1)} GB`;
+      if (kb >= 1024) return `${(kb / 1024).toFixed(1)} MB`;
+      return `${kb} KB`;
+    }
 
     function keyOf(app) { return `${app.manager}\x00${app.package_id}`; }
 
@@ -804,10 +886,15 @@ HTML = r'''<!doctype html>
     function filteredApps() {
       const q = searchEl.value.trim().toLowerCase();
       const m = managerFilterEl.value;
+      const appsOnly = appsOnlyEl.checked;
       return allApps.filter(app => {
         const matchM = !m || app.manager === m;
         const text = `${app.manager} ${app.name} ${app.package_id} ${app.version} ${app.summary}`.toLowerCase();
-        return matchM && (!q || text.includes(q));
+        return matchM && (!appsOnly || app.is_app) && (!q || text.includes(q));
+      }).sort((a, b) => {
+        const x = a[sortKey], y = b[sortKey];
+        const c = typeof x === 'number' ? x - y : String(x).localeCompare(String(y));
+        return c * sortDir || a.name.localeCompare(b.name);
       });
     }
 
@@ -827,6 +914,7 @@ HTML = r'''<!doctype html>
           <td class="col-source"><span class="${tagClass(app.manager)}">${esc(app.manager)}</span></td>
           <td class="col-name">${esc(app.name)}</td>
           <td class="col-ver">${esc(app.version || '-')}</td>
+          <td class="col-size">${fmtSize(app.size_kb)}</td>
           <td class="col-desc">${esc(app.summary || '-')}</td>
         </tr>`;
       }).join('');
@@ -838,6 +926,9 @@ HTML = r'''<!doctype html>
         ? `แสดงทั้งหมด ${shown} รายการ`
         : `แสดง ${shown} จาก ${total} รายการ`;
       emptyStateEl.style.display = apps.length ? 'none' : 'block';
+      headEl.querySelectorAll('th[data-sort]').forEach(th => {
+        th.textContent = th.textContent.replace(/ [▲▼]$/, '') + (th.dataset.sort === sortKey ? (sortDir > 0 ? ' ▲' : ' ▼') : '');
+      });
       statusEl.textContent = `โหลดสำเร็จ — ${total} รายการ`;
     }
 
@@ -856,6 +947,7 @@ HTML = r'''<!doctype html>
       detailBodyEl.innerHTML = `
         <div class="info-row"><span class="info-label">แพ็กเกจ</span><span class="info-val">${esc(app.package_id)}</span></div>
         <div class="info-row"><span class="info-label">รายละเอียด</span><span class="info-val">${esc(app.summary || '-')}</span></div>
+        <div class="info-row"><span class="info-label">ขนาด</span><span class="info-val">${fmtSize(app.size_kb)}</span></div>
       `;
       uninstallEl.disabled = !['APT/dpkg', 'Snap', 'Flatpak'].includes(app.manager);
       locationsEl.textContent = 'กำลังค้นหา...';
@@ -893,26 +985,46 @@ HTML = r'''<!doctype html>
 
     searchEl.addEventListener('input', renderApps);
     managerFilterEl.addEventListener('change', renderApps);
+    appsOnlyEl.addEventListener('change', renderApps);
+    headEl.addEventListener('click', e => {
+      const th = e.target.closest('th[data-sort]');
+      if (!th) return;
+      // size defaults to largest-first, text columns to A→Z
+      sortDir = th.dataset.sort === sortKey ? -sortDir : (th.dataset.sort === 'size_kb' ? -1 : 1);
+      sortKey = th.dataset.sort;
+      renderApps();
+    });
     refreshEl.addEventListener('click', loadApps);
     cancelDialog.addEventListener('click', () => dialog.close());
 
     uninstallEl.addEventListener('click', async () => {
       if (!selected) return;
       const r = await fetch(`/api/command?manager=${encodeURIComponent(selected.manager)}&package_id=${encodeURIComponent(selected.package_id)}`);
-      const { command } = await r.json();
+      const { command, packages, critical, error } = await r.json();
       dialogTitle.textContent = `ถอนการติดตั้ง: ${selected.name}`;
-      dialogInfoEl.innerHTML = `
+      const pkgList = packages.map(p => critical.includes(p)
+        ? `<div class="crit">${esc(p)} (แพ็กเกจระบบ)</div>` : `<div>${esc(p)}</div>`).join('');
+      dialogInfoEl.innerHTML = error ? `
+        <div class="alert-box critical"><span>⛔ apt ไม่ยอมถอนแพ็กเกจนี้ (น่าจะเป็นแพ็กเกจที่ระบบขาดไม่ได้)</span></div>
+        <pre class="output-block">${esc(error)}</pre>
+      ` : `
+        ${critical.length ? `<div class="alert-box critical">
+          <span>⛔ จะลบแพ็กเกจระบบ ${critical.length} ตัว อาจทำให้ระบบหรือเดสก์ท็อปใช้งานไม่ได้</span>
+          <label><input id="ackCritical" type="checkbox"> ฉันเข้าใจความเสี่ยงและต้องการลบต่อ</label>
+        </div>` : ''}
         <table class="info-table">
           <tr><td>แพ็กเกจ</td><td>${esc(selected.package_id)}</td></tr>
           <tr><td>แหล่งติดตั้ง</td><td>${esc(selected.manager)}</td></tr>
+          <tr><td>จะถูกลบ</td><td><b>${packages.length} แพ็กเกจ</b><div class="pkg-list">${pkgList}</div></td></tr>
           <tr><td>คำสั่ง</td><td><div class="cmd-block">${esc(command.join(' '))}</div></td></tr>
         </table>
       `;
       dialogOutput.hidden = true;
       dialogOutput.textContent = '';
       confirmDialog.hidden = false;
-      confirmDialog.disabled = false;
+      confirmDialog.disabled = critical.length > 0 || !!error;
       confirmDialog.textContent = 'ยืนยันถอนการติดตั้ง';
+      document.querySelector('#ackCritical')?.addEventListener('change', e => { confirmDialog.disabled = !e.target.checked; });
       dialog.showModal();
     });
 
@@ -945,7 +1057,14 @@ HTML = r'''<!doctype html>
 class UninstallerHandler(BaseHTTPRequestHandler):
     server_version = "LinuxUninstaller/1.0"
 
+    def host_ok(self) -> bool:
+        # Blocks DNS rebinding: only accept requests addressed to our own loopback origin.
+        return self.headers.get("Host") == f"{HOST}:{self.server.server_address[1]}"
+
     def do_GET(self) -> None:
+        if not self.host_ok():
+            self.send_error(HTTPStatus.FORBIDDEN)
+            return
         parsed = urlparse(self.path)
         if parsed.path == "/":
             self.send_html(HTML)
@@ -959,13 +1078,23 @@ class UninstallerHandler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/api/command":
             app = self.app_from_query(parsed.query)
-            self.send_json({"command": uninstall_command(app) if app else []})
+            self.send_json(
+                {
+                    "command": uninstall_command(app) if app else [],
+                    **(removal_preview(app) if app else {"packages": [], "critical": []}),
+                }
+            )
             return
         self.send_error(HTTPStatus.NOT_FOUND)
 
     def do_POST(self) -> None:
         if urlparse(self.path).path != "/api/uninstall":
             self.send_error(HTTPStatus.NOT_FOUND)
+            return
+        # JSON content type forces a CORS preflight, so other websites can't trigger this.
+        content_type = self.headers.get("Content-Type", "").split(";")[0].strip()
+        if not self.host_ok() or content_type != "application/json":
+            self.send_error(HTTPStatus.FORBIDDEN)
             return
 
         length = int(self.headers.get("Content-Length", "0"))

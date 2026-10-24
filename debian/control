@@ -7,7 +7,8 @@ Rules-Requires-Root: no
 
 Package: linux-uninstaller
 Architecture: all
-Depends: python3, ${misc:Depends}
+Depends: python3, apt, pkexec | policykit-1, ${misc:Depends}
+Suggests: flatpak, snapd
 Description: Simple local web UI for uninstalling Linux applications
  A lightweight local interface to browse installed packages, inspect
  locations, and remove APT/dpkg, Snap, and Flatpak apps from one screen.
